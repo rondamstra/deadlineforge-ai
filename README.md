@@ -70,17 +70,15 @@ npm run build
 
 1. Push to a GitHub repository
 2. In the AWS Amplify console, create a new app → connect your repo
-3. Select **Gen 2** (fullstack) deployment
+3. Ensure a **service role** with `AmplifyBackendDeployFullAccess` is attached (App settings → General)
 4. Amplify will detect `amplify/backend.ts` and deploy both frontend + backend
-5. After first deploy, find the Lambda function URL in CloudFormation outputs
-6. Set `PRIORITIZE_FUNCTION_URL` environment variable in the Amplify console
-7. Redeploy
+5. The Lambda function URL is automatically written to `amplify_outputs.json` during the build — no manual configuration needed
 
 ### Environment Variables
 
 | Variable | Where | Required | Default | Description |
 |----------|-------|----------|---------|-------------|
-| `PRIORITIZE_FUNCTION_URL` | Amplify console | Yes | — | Lambda function URL (set after first deploy) |
+| `PRIORITIZE_FUNCTION_URL` | Auto (amplify_outputs.json) | No | — | Auto-discovered from backend deploy. Can be overridden via env var for local dev. |
 | `BEDROCK_REGION` | Lambda env (auto) | No | us-east-1 | AWS region for Bedrock |
 | `BEDROCK_MODEL_ID` | Lambda env (auto) | No | amazon.nova-lite-v1:0 | Bedrock model ID |
 
