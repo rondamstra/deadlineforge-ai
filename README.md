@@ -126,4 +126,4 @@ deadlineforge-ai/
 
 ## License
 
-Private project — not open source.
+MIT
