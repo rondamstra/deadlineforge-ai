@@ -164,9 +164,16 @@ export async function POST(request: Request) {
   }
 
   // --- Parse JSON from Bedrock response ---
+  // Strip markdown code fences if present (Bedrock sometimes wraps JSON in ```json ... ```)
+  let responseText = result.responseText;
+  const codeFenceMatch = responseText.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  if (codeFenceMatch) {
+    responseText = codeFenceMatch[1];
+  }
+
   let parsedJson: unknown;
   try {
-    parsedJson = JSON.parse(result.responseText);
+    parsedJson = JSON.parse(responseText);
   } catch (err) {
     console.error("[prioritize] Failed to parse Bedrock response as JSON", {
       message: err instanceof Error ? err.message : "unknown parse error",
