@@ -8,7 +8,7 @@ const MODEL_ID = process.env.BEDROCK_MODEL_ID || "amazon.nova-lite-v1:0";
 
 const client = new BedrockRuntimeClient({ region: BEDROCK_REGION });
 
-interface PrioritizeEvent {
+interface PrioritizePayload {
   tasks: string[];
   availableTimeHours: number;
 }
@@ -19,10 +19,39 @@ interface PrioritizeResult {
   error?: { name: string; message: string };
 }
 
+interface FunctionUrlEvent {
+  body?: string;
+  isBase64Encoded?: boolean;
+  tasks?: string[];
+  availableTimeHours?: number;
+}
+
 export const handler = async (
-  event: PrioritizeEvent
+  event: FunctionUrlEvent
 ): Promise<PrioritizeResult> => {
-  const { tasks, availableTimeHours } = event;
+  let payload: PrioritizePayload;
+  try {
+    if (event.body) {
+      const bodyStr = event.isBase64Encoded
+        ? Buffer.from(event.body, "base64").toString("utf-8")
+        : event.body;
+      payload = JSON.parse(bodyStr);
+    } else if (event.tasks) {
+      payload = { tasks: event.tasks, availableTimeHours: event.availableTimeHours || 4 };
+    } else {
+      return {
+        success: false,
+        error: { name: "InvalidInput", message: "No body or tasks provided" },
+      };
+    }
+  } catch {
+    return {
+      success: false,
+      error: { name: "ParseError", message: "Failed to parse request body" },
+    };
+  }
+
+  const { tasks, availableTimeHours } = payload;
 
   console.error("[prioritize-fn] Invoking Bedrock", {
     region: BEDROCK_REGION,
