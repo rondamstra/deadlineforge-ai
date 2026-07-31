@@ -29,14 +29,17 @@ Implement a single-page Next.js application that accepts tasks with optional dea
 - [x] 2. Implement API route and Bedrock integration
   - [x] 2.1 Create the API route handler at `app/api/prioritize/route.ts`
     - Set `export const runtime = "nodejs"`
-    - Instantiate `BedrockRuntimeClient` at module scope with region from `AWS_REGION` env var (default `us-east-1`)
-    - Implement `POST` handler that: parses request JSON, validates with `PrioritizeRequestSchema`, rejects >20 tasks with 400
-    - Construct system prompt with current ISO date/time, Europe/Amsterdam timezone, strict JSON schema instructions, no-fabrication rules for durations/deadlines
-    - Construct user message with available time and numbered task list
-    - Call Bedrock via `ConverseCommand` with model ID from env var (default `amazon.nova-lite-v1:0`), temperature 0.3, maxTokens 4096
-    - Parse response text as JSON, validate with `PrioritizeResponseSchema`
-    - Return validated data on success (200), appropriate error responses for validation failures (400), Bedrock errors (502), and invalid AI response format (502)
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 7.4_
+    - Implement `POST` handler that: parses request JSON, validates with `PrioritizeRequestSchema`
+    - Check `PRIORITIZE_FUNCTION_URL` environment variable is configured (else 500)
+    - Log safe pre-invocation diagnostics (task count, available time — no user text)
+    - Invoke the Lambda function URL via `fetch()` with tasks and availableTimeHours
+    - Handle function invocation errors (network, non-OK status) → 502
+    - Parse function response `{success, responseText?, error?}`
+    - Map known AWS errors (AccessDeniedException, ResourceNotFoundException, ValidationException, CredentialsProviderError) → 502
+    - Parse responseText as JSON, validate with `PrioritizeResponseSchema`
+    - Return validated data on success (200), appropriate error responses for failures
+    - Safe console.error logging in every catch path (no user text, no prompts, no credentials)
+    - _Requirements: 3.1, 3.8, 3.9, 3.10, 5.1, 5.2, 7.4, 11.4, 11.5_
 
   - [ ]* 2.2 Write property tests for schemas
     - **Property 2: Request schema accepts valid inputs and rejects invalid ones**
@@ -53,6 +56,13 @@ Implement a single-page Next.js application that accepts tasks with optional dea
     - Test successful response → 200 with validated data
     - Mock `@aws-sdk/client-bedrock-runtime` for all API route tests
     - _Requirements: 3.8, 3.9, 3.10, 5.1, 5.2_
+
+  - [x] 2.4 Create Amplify Gen 2 Lambda function for Bedrock
+    - Create `amplify/functions/prioritize/resource.ts` with defineFunction (30s timeout, 256MB, env vars for BEDROCK_MODEL_ID and BEDROCK_REGION)
+    - Create `amplify/functions/prioritize/handler.ts` with Bedrock Converse API call logic
+    - Update `amplify/backend.ts` to register function, grant bedrock:InvokeModel via CDK PolicyStatement, create function URL with CORS
+    - Output function URL via backend.addOutput for configuration
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.9, 3.10, 3.11, 3.12, 11.1, 11.2, 11.3_
 
 - [x] 3. Implement UI components
   - [x] 3.1 Create `components/Header.tsx`
@@ -143,11 +153,11 @@ Implement a single-page Next.js application that accepts tasks with optional dea
 
 - [x] 6. Deployment configuration
   - [x] 6.1 Create `amplify.yml` build spec
-    - Configure preBuild phase with `npm ci`
+    - Configure preBuild phase with `npm install` (not npm ci, due to npm 11 workspace issues)
     - Configure build phase with `npm run build`
     - Set artifacts baseDirectory to `.next` with all files
     - Configure cache for `node_modules` and `.next/cache`
-    - _Requirements: N/A (deployment infrastructure)_
+    - _Requirements: 11.6_
 
 - [x] 7. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.

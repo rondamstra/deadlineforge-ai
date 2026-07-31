@@ -2,7 +2,7 @@
 
 ## Introduction
 
-DeadlineForge AI is a lightweight weekend-challenge MVP web application that solves the problem of deciding what to work on first when multiple deadlines compete. Users paste or type a list of tasks (with optional deadlines and estimated durations), optionally specify how much time they have today, and the app uses Amazon Bedrock (Nova Lite) via the Converse API to prioritize tasks, estimate urgency, explain reasoning, and generate an ordered plan with allocated minutes per task. The app is a single-page stateless application with no authentication or persistence, deployed via AWS Amplify Hosting using a Next.js server-side API route on the standard Node.js runtime.
+DeadlineForge AI is a lightweight weekend-challenge MVP web application that solves the problem of deciding what to work on first when multiple deadlines compete. Users paste or type a list of tasks (with optional deadlines and estimated durations), optionally specify how much time they have today, and the app uses Amazon Bedrock (Nova Lite) via the Converse API to prioritize tasks, estimate urgency, explain reasoning, and generate an ordered plan with allocated minutes per task. The app is a single-page stateless application with no authentication or persistence, deployed via AWS Amplify Hosting with an Amplify Gen 2 backend. The Next.js API route validates requests and delegates to an AWS Lambda function (with proper IAM credentials) that calls Bedrock via the Converse API.
 
 ## Glossary
 
@@ -10,9 +10,11 @@ DeadlineForge AI is a lightweight weekend-challenge MVP web application that sol
 - **Task_Input**: A user-provided text entry representing a single task, which may include a deadline and an estimated duration
 - **Task_List**: A collection of one or more Task_Input entries submitted by the user for prioritization (maximum 20 tasks)
 - **Available_Time**: An optional user-provided value representing how many hours the user has available today, defaulting to 4 hours
-- **Prioritization_Engine**: The server-side component within the Next.js API route that calls Amazon Bedrock Nova Lite via the Converse API to analyze tasks and produce a prioritized plan
+- **Prioritization_Engine**: The Lambda function (Prioritize_Function) that constructs prompts and calls Amazon Bedrock Nova Lite via the Converse API to analyze tasks and produce a prioritized plan
+- **Prioritize_Function**: The AWS Lambda function defined in Amplify Gen 2 that calls Amazon Bedrock via the Converse API. Exposed via a function URL. Has an IAM role with `bedrock:InvokeModel` permission.
+- **Function_URL**: The public HTTPS endpoint for the Prioritize_Function (auth type: NONE), called by the API_Route via `fetch()`.
 - **Prioritized_Plan**: The AI-generated output containing a summary, prioritized tasks with per-task priority rank, urgency level, reasoning, estimatedDurationMinutes (null if unknown), allocatedMinutesToday, assumptions, and a warnings array
-- **API_Route**: The Next.js server-side API route (standard Node.js runtime) deployed via AWS Amplify Hosting that handles communication between the App and Amazon Bedrock
+- **API_Route**: The Next.js server-side API route (standard Node.js runtime) that validates requests with Zod, invokes the Prioritize_Function via its Function_URL, and validates the Bedrock response before returning it to the App
 - **Converse_API**: The Amazon Bedrock Converse API accessed through @aws-sdk/client-bedrock-runtime for sending requests to the foundation model
 - **Nova_Lite**: The Amazon Bedrock foundation model (amazon.nova-lite-v1:0) used for task analysis and prioritization
 - **Response_Schema**: A Zod schema defining the strict JSON structure that Nova_Lite must return, validated before rendering results
@@ -52,18 +54,18 @@ DeadlineForge AI is a lightweight weekend-challenge MVP web application that sol
 
 #### Acceptance Criteria
 
-1. WHEN the API_Route receives a valid Task_List, THE Prioritization_Engine SHALL send the tasks to Nova_Lite via the Converse_API using @aws-sdk/client-bedrock-runtime, including any provided deadlines and estimated durations for each task, as well as the Available_Time value
-2. WHEN the Converse_API supports native structured JSON output configuration for the selected model, THE Prioritization_Engine SHALL configure the request to prefer structured JSON output; IF native structured output is unavailable, THE Prioritization_Engine SHALL fall back to the prompt instruction requiring the model to return only valid JSON
-3. THE API_Route SHALL include the current ISO date, current time, and the Europe/Amsterdam timezone in the prompt sent to Nova_Lite so that relative date expressions such as "tomorrow" and "Friday" can be interpreted correctly by the model
-4. THE Prioritization_Engine SHALL pass natural-language deadline expressions directly to Nova_Lite without any separate date-parsing logic on the server
-5. IF a Task_Input lacks a deadline, THEN THE Prioritization_Engine SHALL instruct Nova_Lite to list any assumptions made about that task; IF a Task_Input lacks an estimated duration, THEN THE Prioritization_Engine SHALL instruct Nova_Lite to set estimatedDurationMinutes to null for that task and SHALL NOT estimate or fabricate a duration value; assumptions about allocation rationale MAY still be listed
-6. THE Prioritization_Engine SHALL instruct Nova_Lite to return a strict JSON response containing: a summary string providing a brief overview of the plan, for each task a priority rank, an urgency level from the set (Critical, High, Medium, Low), a reason for its position, estimatedDurationMinutes (ONLY the user-provided duration in minutes, or null if the user did not provide one; never AI-estimated), allocatedMinutesToday (the minutes allocated to this task in today's plan), assumptions, and a top-level warnings array highlighting risks
-7. THE Prioritization_Engine SHALL instruct Nova_Lite to generate an ordered plan where allocatedMinutesToday values fit within the user's Available_Time; tasks that do NOT fit within the Available_Time SHALL remain in the prioritized list with allocatedMinutesToday set to 0 and an explanation in the reason field that they are deferred to another day
-8. IF the API_Route receives a Task_List containing more than 20 tasks, THEN THE Prioritization_Engine SHALL reject the request and return an error indicating the maximum of 20 tasks has been exceeded
-9. WHEN the API_Route receives a response from Nova_Lite, THE Prioritization_Engine SHALL validate the response against the Response_Schema (Zod) before returning it to the App
-10. IF the Nova_Lite response does not conform to the Response_Schema, THEN THE Prioritization_Engine SHALL return an error indicating the AI returned an unexpected format
-11. THE Prioritization_Engine SHALL NOT invent, estimate, or fabricate task durations; IF the user did not provide a duration, estimatedDurationMinutes SHALL be null; allocatedMinutesToday MAY still be non-zero with an assumption explaining the allocation is based on priority rather than a known duration; THE Prioritization_Engine SHALL NOT invent or fabricate deadlines
-12. THE Prioritization_Engine SHALL ensure that the sum of allocatedMinutesToday across all tasks does NOT exceed Available_Time converted to minutes
+1. WHEN the API_Route receives a valid Task_List, THE API_Route SHALL invoke the Prioritize_Function via its Function_URL, passing the tasks and Available_Time. THE Prioritize_Function SHALL send the tasks to Nova_Lite via the Converse_API using @aws-sdk/client-bedrock-runtime.
+2. THE Prioritize_Function SHALL instruct Nova_Lite to return only valid JSON via the system prompt.
+3. THE Prioritize_Function SHALL include the current ISO date, current time, and the Europe/Amsterdam timezone in the prompt sent to Nova_Lite so that relative date expressions such as "tomorrow" and "Friday" can be interpreted correctly by the model
+4. THE Prioritize_Function SHALL pass natural-language deadline expressions directly to Nova_Lite without any separate date-parsing logic on the server
+5. IF a Task_Input lacks a deadline, THEN THE Prioritize_Function SHALL instruct Nova_Lite to list any assumptions made about that task; IF a Task_Input lacks an estimated duration, THEN THE Prioritize_Function SHALL instruct Nova_Lite to set estimatedDurationMinutes to null for that task and SHALL NOT estimate or fabricate a duration value; assumptions about allocation rationale MAY still be listed
+6. THE Prioritize_Function SHALL instruct Nova_Lite to return a strict JSON response containing: a summary string providing a brief overview of the plan, for each task a priority rank, an urgency level from the set (Critical, High, Medium, Low), a reason for its position, estimatedDurationMinutes (ONLY the user-provided duration in minutes, or null if the user did not provide one; never AI-estimated), allocatedMinutesToday (the minutes allocated to this task in today's plan), assumptions, and a top-level warnings array highlighting risks
+7. THE Prioritize_Function SHALL instruct Nova_Lite to generate an ordered plan where allocatedMinutesToday values fit within the user's Available_Time; tasks that do NOT fit within the Available_Time SHALL remain in the prioritized list with allocatedMinutesToday set to 0 and an explanation in the reason field that they are deferred to another day
+8. IF the API_Route receives a Task_List containing more than 20 tasks, THEN THE API_Route SHALL reject the request and return an error indicating the maximum of 20 tasks has been exceeded
+9. WHEN the API_Route receives a response from the Prioritize_Function, THE API_Route SHALL validate the Bedrock response against the Response_Schema (Zod) before returning it to the App
+10. IF the Nova_Lite response does not conform to the Response_Schema, THEN THE API_Route SHALL return an error indicating the AI returned an unexpected format
+11. THE Prioritize_Function SHALL NOT invent, estimate, or fabricate task durations; IF the user did not provide a duration, estimatedDurationMinutes SHALL be null; allocatedMinutesToday MAY still be non-zero with an assumption explaining the allocation is based on priority rather than a known duration; THE Prioritize_Function SHALL NOT invent or fabricate deadlines
+12. THE Prioritize_Function SHALL ensure that the sum of allocatedMinutesToday across all tasks does NOT exceed Available_Time converted to minutes
 
 ### Requirement 4: Prioritized Plan Display
 
@@ -86,7 +88,7 @@ DeadlineForge AI is a lightweight weekend-challenge MVP web application that sol
 
 #### Acceptance Criteria
 
-1. IF the API_Route fails to communicate with Nova_Lite, THEN THE App SHALL display a user-friendly error message indicating the service is temporarily unavailable and re-enable the submit button
+1. IF the API_Route fails to communicate with the Prioritize_Function, THEN THE App SHALL display a user-friendly error message indicating the service is temporarily unavailable and re-enable the submit button
 2. IF the API_Route returns an error response, THEN THE App SHALL display a user-friendly error message that does not expose raw error codes or stack traces
 3. WHEN an error is displayed, THE App SHALL provide a visible retry button that resubmits the most recent Task_List without requiring the user to re-enter it
 4. IF an error occurs during processing, THEN THE App SHALL preserve the user's Task_List input and Available_Time value so they remain available for retry or editing
@@ -113,7 +115,7 @@ DeadlineForge AI is a lightweight weekend-challenge MVP web application that sol
 1. THE App SHALL NOT persist Task_List data, Available_Time, or Prioritized_Plan data to localStorage, sessionStorage, cookies, or any server-side storage mechanism
 2. WHEN the user refreshes the page, THE App SHALL display the initial empty state with no Task_List entries and no Prioritized_Plan displayed, with Available_Time reset to the default of 4 hours
 3. THE App SHALL NOT require user authentication or account creation
-4. THE API_Route SHALL NOT log or store user Task_List data or Prioritized_Plan data beyond the lifetime of a single request-response cycle
+4. THE API_Route SHALL NOT log or store user Task_List data, Prioritized_Plan data, or the Prioritize_Function URL beyond what is necessary for invocation within a single request-response cycle
 5. THE App SHALL store all user data exclusively in React component state, which is cleared on page unload or refresh
 
 ### Requirement 8: Example Tasks
@@ -158,6 +160,19 @@ DeadlineForge AI is a lightweight weekend-challenge MVP web application that sol
 6. WHEN the user clicks the "Reset" button, THE App SHALL return the results area to the Empty State
 7. THE "Reset" button SHALL NOT refresh or reload the page
 8. THE "Reset" button SHALL NOT affect any server-side state
+
+### Requirement 11: Infrastructure and Deployment
+
+**User Story:** As a developer, I want the application deployed via AWS Amplify Gen 2 with a Lambda backend, so that the AI prioritization runs with proper IAM credentials and scales independently.
+
+#### Acceptance Criteria
+
+1. THE App SHALL be deployed via AWS Amplify Hosting as a Gen 2 fullstack application
+2. THE Amplify backend SHALL define a Lambda function with `bedrock:InvokeModel` IAM permission granted via CDK
+3. THE Lambda function SHALL expose a function URL (auth type: NONE) for invocation by the API_Route
+4. THE API_Route SHALL read the function URL from the `PRIORITIZE_FUNCTION_URL` environment variable
+5. IF the `PRIORITIZE_FUNCTION_URL` environment variable is not set, THE API_Route SHALL return a 500 error indicating the service is not configured
+6. THE `amplify.yml` build spec SHALL use `npm install` (not `npm ci`) in the preBuild phase
 
 ## API Schemas
 
